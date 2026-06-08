@@ -38,9 +38,11 @@ def fulltext_search(db, query: str, limit: int = 5) -> list[dict]:
 
 
 def faceted_search(db, query: str | None = None) -> dict:
+    # "Match everything" needs an indexed path; _id is not in the search mapping.
+    # status is mapped as stringFacet and present on every shipment.
     operator = (
         {"text": {"query": query, "path": "description"}}
-        if query else {"exists": {"path": "_id"}}
+        if query else {"exists": {"path": "status"}}
     )
     pipeline = [
         {"$searchMeta": {
