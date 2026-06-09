@@ -53,10 +53,11 @@ def main() -> None:
 
     banner("DEMO 4 - Vector Search powered RAG")
     note(
-        "Embeddings generated with Voyage AI ('voyage-4', 1024 dims) at ingest time.\n"
-        "MongoDB acquired Voyage AI - these models are now the recommended default for\n"
-        "Atlas Vector Search and run in the same SOC2/HIPAA boundary as your data.\n"
-        "No second database, no separate vector store, no replication pipeline."
+        "Agent-memory documents are embedded at ingest time with Voyage AI\n"
+        "(voyage-3, 1024 dims) and indexed in agent_memory_vector - an HNSW vector\n"
+        "index with cosine similarity and scalar quantization. Each question below\n"
+        "is embedded as a query, passed to $vectorSearch, and the top-k results are\n"
+        "rendered as a grounded RAG prompt."
     )
 
     questions = [
@@ -75,14 +76,14 @@ def main() -> None:
         print("\n--- Prompt that would be sent to the LLM ---")
         print(render_rag_prompt(q, hits))
 
-    banner("Why this matters for the GenAI platform")
+    banner("Index and query properties")
     note(
-        "1. Single-store: the copilot's memory lives next to the shipment data it\n"
-        "   reasons about - join vector hits with live operational state in one query.\n"
-        "2. Pre-filtering: $vectorSearch.filter pushes down to the HNSW graph, so a\n"
-        "   topic constraint does not destroy recall the way post-filtering would.\n"
-        "3. Voyage models: best-in-class retrieval quality, billed through MongoDB,\n"
-        "   already covered by your Atlas DPA - zero extra vendor onboarding."
+        "1. Co-location: agent_memory and shipments live in the same cluster, so a\n"
+        "   single aggregation can $lookup operational state alongside vector hits.\n"
+        "2. Pre-filter push-down: $vectorSearch.filter on metadata.topic is applied\n"
+        "   inside the HNSW traversal, preserving recall versus post-filtering.\n"
+        "3. Encoder symmetry: queries are embedded through the same Voyage client\n"
+        "   used at ingest, with input_type='query' vs 'document' for asymmetry."
     )
 
 

@@ -103,39 +103,47 @@ Set `DEMO_NO_PAUSE=1` to run unattended.
 
 ---
 
-## Presenter cheat-sheet
+## Demo overview
 
-### Demo 1 - ACID
-> "Today the search index lags the system of record by seconds-to-minutes.
-> A `delivered` scan is in MySQL but ES still shows `in_transit`. With MongoDB
-> the document IS the searchable record, and we wrap the four writes -
-> shipment, tracking event, carrier counter, customer last-delivery - in a
-> snapshot-isolation transaction. Then we read from a brand-new session with
-> `readConcern: majority` and prove instant visibility."
+### Demo 1 — ACID multi-document transactions (`demos/demo1_acid.py`)
+Simulates a driver scanning "delivered" at the dock and atomically applying four
+writes — shipment status update, tracking event insert, carrier `delivered_count`
+increment, customer `last_delivery_at` timestamp — inside a snapshot-isolation
+transaction via `session.with_transaction()` (production-grade retries on
+transient errors). Prints a BEFORE/AFTER snapshot of every mutated field on
+both the happy path and a deliberately failed path (an injected exception after
+the four writes are staged) to make rollback observable. Closes by reading from
+a freshly opened `MongoClient` with `readConcern: majority` to show immediate
+cross-client visibility.
 
-### Demo 2 - Atlas Search
-> "One index, one query language. Boost `description` 3x, search customer name
-> and cities, match exact reference numbers in the same `$search` stage.
-> `$searchMeta` returns only facet counts in a single round-trip. Autocomplete
-> uses `edgeGram` + `fuzzy=1` on the same index. The Elasticsearch cluster,
-> the Logstash/Kafka sync, and the reindex jobs all go away."
+### Demo 2 — Atlas Search (`demos/demo2_search.py`)
+Exercises four workloads against a single `shipments_search` index:
 
-### Demo 3 - Geospatial
-> "Native 2dsphere index, GeoJSON in and out. `$geoNear` returns distance in
-> meters as a projected field - no app-side haversine. `$geoWithin` against an
-> arbitrary polygon means new geofences are zero-DDL: just insert a document.
-> Combined with Change Streams in the app tier you get real-time fence
-> entry/exit events without polling."
+- **2A — Full-text relevance**: compound `$search` across `description` (3x
+  boost), `customer.name`, origin/destination city, and reference numbers
+  (BOL / PO / PRO).
+- **2B — Faceted search**: `$searchMeta` returns only bucket counts for
+  status, carrier, customer tier, and destination state — the data behind
+  left-rail filters in a shipper portal.
+- **2C — Autocomplete**: `edgeGram` tokenization with `fuzzy.maxEdits=1` on
+  customer name, destination city, and carrier name.
+- **2D — Keyword ids + legacy `searchKeywords`**: exact-id lookup on
+  `shipmentId` / `customer.customerId` and a denormalized search bag for
+  drop-in compatibility with existing Elasticsearch queries.
 
-### Demo 4 - Vector Search + RAG
-> "Embeddings created with Voyage AI `voyage-4`, 1024 dims, scalar-quantized
-> HNSW. MongoDB owns Voyage now - same DPA, same support, no second vendor.
-> `$vectorSearch.filter` push-down means topic filters don't wreck recall. The
-> copilot's memory sits next to the shipment data it reasons about, so a single
-> aggregation can join vector hits with live operational state."
+### Demo 3 — Geospatial (`demos/demo3_geo.py`)
+Runs two queries against a native 2dsphere index on `current_location`:
 
-### Closing
-> "All four workloads share one cluster, one security perimeter, one backup,
-> one on-call rotation. At 3-7M transactions/day this fits comfortably inside
-> an M40 with headroom for Search and Vector Search dedicated nodes if you
-> want to isolate them."
+- **3A — `$geoNear`**: shipments within 50 km of the Port of Los Angeles,
+  returning geodesic distance in meters as a projected field.
+- **3B — `$geoWithin`**: shipments currently inside the Chicago Intermodal
+  DC polygon, illustrating that new geofences are zero-DDL — just insert a
+  GeoJSON document.
+
+### Demo 4 — Vector Search + RAG (`demos/demo4_vector_rag.py`)
+A natural-language logistics copilot. Embeds operator questions with Voyage AI
+(`voyage-3`, 1024 dims) and queries the `agent_memory_vector` HNSW index
+(cosine similarity, scalar-quantized) for the most relevant SOPs, exception
+playbooks, and lane-history documents. Demonstrates `$vectorSearch.filter`
+pre-filter push-down on `metadata.topic` to keep recall scoped, and renders
+the retrieved chunks as a grounded RAG prompt.

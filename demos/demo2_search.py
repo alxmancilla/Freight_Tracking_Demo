@@ -104,9 +104,9 @@ def main() -> None:
 
     banner("DEMO 2A - Full-text relevance search")
     note(
-        "One index, one query language. We boost the description field 3x and search\n"
-        "customer name, city, and reference numbers in the same query. This replaces a\n"
-        "separate Elasticsearch cluster - no dual-write, no sync lag, no schema drift."
+        "Compound $search across the shipments_search index: description (3x boost),\n"
+        "customer.name, origin/destination city, and reference numbers (BOL/PO/PRO).\n"
+        "Results are ranked by searchScore."
     )
     pause("ENTER to run: 'refrigerated pharmaceuticals'")
     pprint(fulltext_search(db, "refrigerated pharmaceuticals"))
@@ -119,9 +119,10 @@ def main() -> None:
 
     banner("DEMO 2B - Faceted search ($searchMeta)")
     note(
-        "$searchMeta returns ONLY facet counts - no docs streamed. This is what powers\n"
-        "the left-rail filters in your shipper portal: status counts, top carriers,\n"
-        "customer tier mix, destination state distribution. Single round-trip."
+        "$searchMeta returns bucket counts only - no documents - for the four\n"
+        "stringFacet fields: status, carrier.name, customer.tier, destination.state.\n"
+        "The operator clause selects which documents are counted; here exists on\n"
+        "status matches every shipment."
     )
     pause("ENTER to compute facets across all shipments")
     facets = faceted_search(db)
@@ -132,9 +133,9 @@ def main() -> None:
 
     banner("DEMO 2C - Autocomplete / type-ahead")
     note(
-        "edgeGram tokenization + fuzzy=1 gives Google-style suggestions as the user\n"
-        "types. Same index as full-text and facets - no separate suggester cluster.\n"
-        "Sub-50ms responses on customer.name, destination.city, and carrier.name."
+        "Prefix matching with edgeGram tokenization (minGrams=2, maxGrams=15) and\n"
+        "fuzzy.maxEdits=1 against customer.name, destination.city, and carrier.name,\n"
+        "all defined as autocomplete fields on the same shipments_search index."
     )
 
     # Sample 3 real customer names from the data so the prefixes always match.
@@ -162,13 +163,11 @@ def main() -> None:
 
     banner("DEMO 2D - Keyword ids + legacy searchKeywords + carrier text search")
     note(
-        "Keyword-analyzed fields (shipmentId, customer.customerId) give exact-id\n"
-        "lookups through the Search index - useful when a saved ES query was written\n"
-        "against these field names. searchKeywords is the denormalized 'one field to\n"
-        "search them all' bag your ES users are used to; we keep it populated for\n"
-        "drop-in query compatibility, but you do NOT need it for the demos above.\n"
-        "carrier.name is dual-mapped: same field, used as text here and as a facet\n"
-        "in Demo 2B."
+        "Exact-id matching on shipmentId and customer.customerId (mapped with the\n"
+        "lucene.keyword analyzer), text search on the denormalized searchKeywords\n"
+        "bag, and text search on carrier.name - all combined in a single compound\n"
+        "$search query. carrier.name is dual-mapped as text here and as a facet in\n"
+        "Demo 2B; the same field can carry multiple index types."
     )
     sample = db[config.COL_SHIPMENTS].find_one({}, {"shipmentId": 1, "customer.customerId": 1})
     pause(f"ENTER to look up by shipmentId={sample['shipmentId']} / customerId={sample['customer']['customerId']} / keyword='knight'")
@@ -179,11 +178,13 @@ def main() -> None:
         keyword="knight",
     ))
 
-    banner("Migration takeaway")
+    banner("Index summary")
     note(
-        "Same data, same cluster, same security perimeter as the OLTP workload.\n"
-        "You delete the Elasticsearch cluster, the Logstash/Kafka sync pipeline, the\n"
-        "reindex jobs, and the on-call rotation that goes with all of that."
+        "All four queries above (full-text, facets, autocomplete, exact-id) run\n"
+        "against the single shipments_search Atlas Search index on the same cluster\n"
+        "that holds the operational shipment documents. Field-level multi-mapping\n"
+        "(e.g. carrier.name as text + facet + autocomplete) is what makes one index\n"
+        "sufficient for all four workloads."
     )
 
 

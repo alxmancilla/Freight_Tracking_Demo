@@ -168,11 +168,12 @@ def main() -> None:
 
     banner("DEMO 1 - ACID multi-document transactions")
     note(
-        "Today on Elasticsearch+MySQL you have eventual consistency between the search\n"
-        "index and the system of record. A delivered scan can show up in MySQL but the\n"
-        "search index still shows in_transit for seconds-to-minutes. With MongoDB the\n"
-        "same document is the system of record AND the queryable surface, and we wrap\n"
-        "the multi-collection write in a snapshot-isolation transaction."
+        "Marks an in-transit shipment as delivered with four writes across four\n"
+        "collections - shipments, tracking_events, carriers, customers - committed\n"
+        "atomically inside a snapshot-isolation transaction (readConcern=snapshot,\n"
+        "writeConcern=majority) via session.with_transaction(). The script then runs\n"
+        "the same transaction with an injected error to verify rollback, and ends\n"
+        "with a read-your-writes check from a separate MongoClient."
     )
     pause("Show the script source, then ENTER to pick a shipment")
 
@@ -194,10 +195,10 @@ def main() -> None:
 
     banner("Failure path - inject an error, prove nothing commits")
     note(
-        "Same transaction, but the simulated POD photo upload service raises after\n"
-        "the four writes are staged. with_transaction surfaces the exception and the\n"
-        "server aborts the transaction - the snapshot below must match the BEFORE row\n"
-        "exactly, with zero side effects across any of the four collections."
+        "Runs the same four-write callback against a different in-transit shipment,\n"
+        "but raises RuntimeError after the writes are staged. with_transaction lets\n"
+        "the exception propagate and aborts the transaction on the server. The AFTER\n"
+        "snapshot is asserted equal to BEFORE across all four collections."
     )
     victim = _pick_in_transit(db, exclude_id=target["_id"])
     v_carrier = victim["carrier"]["id"]
@@ -215,19 +216,17 @@ def main() -> None:
 
     banner("Read-your-own-writes from a brand-new MongoClient")
     note(
-        "We open a fresh MongoClient (new connection pool, new logical session) and\n"
-        "read with readConcern='majority'. The updated status, the new tracking event,\n"
-        "and the bumped counters are all visible immediately - the consistency\n"
-        "guarantee the customer asked for, with no cross-system sync lag."
+        "Opens a fresh MongoClient (new connection pool, new logical session) and\n"
+        "reads back shipment.status, shipment.actual_delivery, and the inserted\n"
+        "tracking_events document with readConcern='majority'."
     )
     verify_read_your_writes(target["_id"])
 
     banner("Throughput context for 3-7M txn/day")
     note(
-        "3M/day -> ~35 writes/sec sustained, peak ~350 writes/sec.\n"
-        "7M/day -> ~80 writes/sec sustained, peak ~800 writes/sec.\n"
-        "A single M30 cluster easily handles this; M40+ gives headroom for the\n"
-        "Atlas Search and Vector Search workloads on the same cluster."
+        "Target workload sizing:\n"
+        "  3M txn/day -> ~35 writes/sec sustained, ~350 writes/sec peak.\n"
+        "  7M txn/day -> ~80 writes/sec sustained, ~800 writes/sec peak."
     )
 
 

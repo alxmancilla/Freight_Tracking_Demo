@@ -61,36 +61,37 @@ def main() -> None:
 
     banner("DEMO 3A - $geoNear: shipments closest to Port of Los Angeles")
     note(
-        "Native 2dsphere index on current_location. We compute geodesic distance in\n"
-        "meters as part of the projection - no application-side math, no PostGIS\n"
-        "extension, no second database to keep in sync."
+        "$geoNear against the 2dsphere index on shipments.current_location returns\n"
+        "shipments ordered by geodesic distance from the port center, with the\n"
+        "distance projected as distance_m (meters), capped at 50 km."
     )
     pause("ENTER")
     pprint(near_port(db, "Port of Los Angeles", max_km=50))
 
     banner("DEMO 3B - $geoWithin: shipments currently inside the Chicago Intermodal DC fence")
     note(
-        "Geofences are GeoJSON polygons stored as plain documents. $geoWithin uses the\n"
-        "same 2dsphere index and works with any polygon - port, yard, customer dock,\n"
-        "city, or country boundary. Index definitions never need to change to add fences."
+        "Geofences are GeoJSON polygons stored as documents in the geofences\n"
+        "collection. $geoWithin reuses the 2dsphere index on current_location and\n"
+        "matches shipments whose current position falls inside the polygon. Adding\n"
+        "new fences requires no index changes."
     )
     pause("ENTER")
     pprint(within_geofence(db, "Chicago Intermodal DC"))
 
     banner("DEMO 3C - Tracking events that occurred inside each port")
     note(
-        "This is what powers dwell-time analytics and demurrage risk dashboards.\n"
-        "One query per geofence, indexed lookups, fully consistent with the live\n"
-        "shipment data because it's all one cluster."
+        "For each port-type geofence, counts tracking_events whose location falls\n"
+        "inside the polygon using $geoWithin against tracking_events.location.\n"
+        "Results are sorted by event count to surface the busiest ports."
     )
     pause("ENTER")
     pprint(events_inside_ports(db))
 
     banner("Operational pattern")
     note(
-        "Change Streams + $geoIntersects in the application tier = real-time geofence\n"
-        "entry/exit events without polling. We can wire that into the ACID demo for an\n"
-        "end-to-end story: enter geofence -> auto-update status -> emit notification."
+        "Geospatial queries compose with Change Streams in the application tier to\n"
+        "react to geofence entry/exit events as they happen, and with multi-document\n"
+        "transactions (Demo 1) to update shipment state atomically on entry."
     )
 
 
