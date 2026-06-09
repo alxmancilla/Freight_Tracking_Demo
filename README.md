@@ -68,6 +68,7 @@ python -m demos.demo1_acid
 python -m demos.demo2_search
 python -m demos.demo3_geo
 python -m demos.demo4_vector_rag
+python -m demos.demo5_exception_workflow   # composite: stitches 1 + 3 + 4
 ```
 
 Each script prints `[NOTES]` blocks and pauses for ENTER between sections.
@@ -98,7 +99,8 @@ Set `DEMO_NO_PAUSE=1` to run unattended.
     ├── demo1_acid.py
     ├── demo2_search.py
     ├── demo3_geo.py
-    └── demo4_vector_rag.py
+    ├── demo4_vector_rag.py
+    └── demo5_exception_workflow.py
 ```
 
 ---
@@ -147,3 +149,21 @@ A natural-language logistics copilot. Embeds operator questions with Voyage AI
 playbooks, and lane-history documents. Demonstrates `$vectorSearch.filter`
 pre-filter push-down on `metadata.topic` to keep recall scoped, and renders
 the retrieved chunks as a grounded RAG prompt.
+
+### Demo 5 — Exception management workflow (composite) (`demos/demo5_exception_workflow.py`)
+Stitches Demos 1, 3, and 4 into a single control-tower scenario:
+
+- **A — Detect**: `$geoWithin` against port geofences finds an in-transit
+  shipment dwelling inside a port polygon (Demo 3B mechanics).
+- **B — React**: a snapshot-isolation transaction via `session.with_transaction()`
+  flips the shipment to `at_risk`, appends a structured entry to
+  `exceptions[]`, inserts an `exception_dwell` tracking event, increments the
+  carrier's `exception_count`, and sets the customer's `last_alerted_at` —
+  all atomically (Demo 1 mechanics).
+- **C — Decide**: `vector_search()` (imported from Demo 4) queries
+  `agent_memory_vector` with a pre-filter on `metadata.topic="exception_playbook"`
+  and renders the matching playbook chunks as a grounded RAG prompt.
+
+Re-uses functions exported by Demo 4 (`vector_search`, `render_rag_prompt`)
+and mirrors the transaction pattern from Demo 1 — each underlying demo
+remains independently runnable.
