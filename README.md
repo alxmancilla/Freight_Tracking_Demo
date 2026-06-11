@@ -50,6 +50,11 @@ Total runtime ~15-25 minutes depending on cluster tier and Voyage API throughput
 > Tip: for a quick smoke test, override sizes in `.env`:
 > `N_SHIPMENTS=2000 N_TRACKING_EVENTS=10000 N_AGENT_MEMORY=300`
 
+> Note: re-running `generate_agent_memory` drops and re-creates the
+> `agent_memory` collection, which also removes its Vector Search index.
+> Re-run `python -m indexes.setup_indexes` afterwards so the
+> `agent_memory_vector` index is recreated.
+
 ## 4. Build Atlas Search + Vector Search indexes
 
 ```bash
@@ -74,6 +79,13 @@ python -m demos.demo5_exception_workflow   # composite: stitches 1 + 3 + 4
 Each script prints `[NOTES]` blocks and pauses for ENTER between sections.
 Set `DEMO_NO_PAUSE=1` to run unattended.
 
+Demo 5 optionally invokes an LLM in Stage C. To enable it, set one of
+`ANTHROPIC_API_KEY` (`pip install anthropic`) or `OPENAI_API_KEY`
+(`pip install openai`) in `.env`. Without a key the prompt is rendered
+and the LLM step prints a `[skipped: ...]` line. Override the model with
+`LLM_MODEL` and the Stage A dwell threshold with `DEMO5_DWELL_HOURS`
+(default 12).
+
 ---
 
 ## Repository layout
@@ -96,6 +108,7 @@ Set `DEMO_NO_PAUSE=1` to run unattended.
 │   └── setup_indexes.py      # Atlas Search + Vector Search index DDL
 └── demos/
     ├── _presenter.py
+    ├── _llm.py                # optional Anthropic/OpenAI wrapper (lazy import)
     ├── demo1_acid.py
     ├── demo2_search.py
     ├── demo3_geo.py
@@ -151,19 +164,31 @@ pre-filter push-down on `metadata.topic` to keep recall scoped, and renders
 the retrieved chunks as a grounded RAG prompt.
 
 ### Demo 5 — Exception management workflow (composite) (`demos/demo5_exception_workflow.py`)
-Stitches Demos 1, 3, and 4 into a single control-tower scenario:
+Stitches Demos 1, 3, and 4 into a single control-tower scenario, with a
+real dwell computation, a live change-stream observer, an operational-context
+join, and an optional LLM call:
 
-- **A — Detect**: `$geoWithin` against port geofences finds an in-transit
-  shipment dwelling inside a port polygon (Demo 3B mechanics).
+- **A — Detect**: per-port aggregation combining `$geoWithin` on
+  `shipments.current_location` with a `$lookup` against `tracking_events` to
+  compute `hours_since_last_event = $$NOW - last_event.timestamp`. Returns
+  the worst offender across all port geofences whose dwell exceeds
+  `DEMO5_DWELL_HOURS` (default 12).
 - **B — React**: a snapshot-isolation transaction via `session.with_transaction()`
   flips the shipment to `at_risk`, appends a structured entry to
-  `exceptions[]`, inserts an `exception_dwell` tracking event, increments the
-  carrier's `exception_count`, and sets the customer's `last_alerted_at` —
-  all atomically (Demo 1 mechanics).
+  `exceptions[]`, inserts an `exception_dwell` tracking event, increments
+  the carrier's `exception_count`, and sets the customer's `last_alerted_at`
+  — all atomically (Demo 1 mechanics). A background thread runs a change
+  stream filtered to this shipment's `status=at_risk` transition and reports
+  the observed `clusterTime`, demonstrating downstream notification on commit.
 - **C — Decide**: `vector_search()` (imported from Demo 4) queries
-  `agent_memory_vector` with a pre-filter on `metadata.topic="exception_playbook"`
-  and renders the matching playbook chunks as a grounded RAG prompt.
+  `agent_memory_vector` with a pre-filter on
+  `metadata.topic="exception_playbook"`. A second aggregation joins the
+  shipment with its last 3 tracking events and the carrier scorecard in a
+  single round-trip. Both retrievals feed a grounded prompt with separate
+  `RETRIEVED PLAYBOOKS` and `LIVE OPERATIONAL STATE` sections. If
+  `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` is set, the prompt is sent to the
+  configured LLM via `demos/_llm.py`; otherwise the LLM step is skipped
+  with an explanatory line.
 
-Re-uses functions exported by Demo 4 (`vector_search`, `render_rag_prompt`)
-and mirrors the transaction pattern from Demo 1 — each underlying demo
-remains independently runnable.
+Re-uses `vector_search()` from Demo 4 and mirrors the transaction pattern
+from Demo 1 — each underlying demo remains independently runnable.
